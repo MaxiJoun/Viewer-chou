@@ -29,12 +29,20 @@ Le navigateur ne lit pas le `.abc` directement — il lit la sortie du converter
 python converter/import_server.py 8080
 ```
 
-Ouvrir l'URL affichée, **glisser un `.abc`, `.usd(c)` ou `.blend` sur la page** :
-Blender convertit en tâche de fond et le viewer charge le modèle. Les `.usd` /
-`.blend` amènent aussi les **matériaux** (base color / metallic / roughness) ;
-l'`.abc` reste en gris (le format ne porte pas de matériau). Le menu *modèle*
-liste ceux déjà convertis. (Blender cherché via `$BLENDER`, le PATH, puis les
-chemins d'install classiques.)
+Ouvrir l'URL affichée, **glisser un `.chou`, `.abc`, `.usd(c)` ou `.blend` sur la
+page** : Blender convertit en tâche de fond et le viewer charge le modèle. Les
+`.chou` / `.usd` / `.blend` amènent aussi les **matériaux** (flat : couleur ou
+texture de base) ; l'`.abc` reste en gris. (Blender cherché via `$BLENDER`, le
+PATH, puis les chemins d'install classiques.)
+
+Contre l'accumulation de modèles de test :
+- boutons **🗑** (supprimer le modèle courant) et **vider** (tout) dans la barre
+- `--single` : chaque import **remplace** le précédent (jamais de liste)
+- `--fresh` : vide `viewer/models/` au démarrage du serveur
+
+```bash
+python converter/import_server.py 8080 --single --fresh
+```
 
 **Ou à la main** — convertir puis servir en statique :
 

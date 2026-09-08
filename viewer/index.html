@@ -19,6 +19,10 @@
                 border-radius: 6px; padding: 4px 8px; font: inherit; }
   #bar .hint { color: #9a9aa6; }
   #bar b { color: #cfe0ff; }
+  #bar button { background: #1c1c22; color: #c9c9d2; border: 1px solid #333;
+                border-radius: 6px; padding: 4px 7px; font: inherit; cursor: pointer; }
+  #bar button:hover { background: #2a2a32; color: #fff; }
+  #bar button:disabled { opacity: .35; cursor: default; }
 
   /* drop overlay */
   #drop { position: fixed; inset: 0; z-index: 20; display: none;
@@ -42,6 +46,8 @@
   <label>modèle
     <select id="pick"></select>
   </label>
+  <button id="del" title="Supprimer ce modèle">🗑</button>
+  <button id="clear" title="Tout supprimer">vider</button>
   <span class="hint">— ou glisse un <b>.chou</b> / <b>.abc</b> / <b>.usd(c)</b> sur la page</span>
 </div>
 
@@ -55,6 +61,8 @@
   const pick = document.getElementById('pick');
   const drop = document.getElementById('drop');
   const toast = document.getElementById('toast');
+  const delBtn = document.getElementById('del');
+  const clearBtn = document.getElementById('clear');
 
   const say = (msg, err = false) => {
     toast.textContent = msg;
@@ -85,13 +93,35 @@
 
   pick.addEventListener('change', () => loadModel(pick.value));
 
+  // drag & drop import — only works when served by converter/import_server.py
+  const canImport = /^https?:$/.test(location.protocol);
+
+  // delete buttons need the server too
+  delBtn.disabled = clearBtn.disabled = !canImport;
+  async function delModels(pathTail, label) {
+    if (!canImport) return;
+    try {
+      const res = await fetch(new URL('models' + pathTail, location.href), { method: 'DELETE' });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      say(`✓ ${label}`);
+      const names = await fetch('./models', { cache: 'no-store' }).then((r) => r.json());
+      pick.innerHTML = names.map((n) => `<option>${n}</option>`).join('');
+      if (names.length) loadModel(names[0]);
+      else { pick.innerHTML = '<option>—</option>'; v.removeAttribute('src'); }
+    } catch (e) { say(`Échec suppression : ${e.message}`, true); }
+  }
+  delBtn.addEventListener('click', () => {
+    const n = pick.value;
+    if (n && n !== '—') delModels('/' + encodeURIComponent(n), `${n} supprimé`);
+  });
+  clearBtn.addEventListener('click', () => {
+    if (confirm('Supprimer tous les modèles ?')) delModels('', 'tous les modèles supprimés');
+  });
+
   // initial model
   const want = new URLSearchParams(location.search).get('model') || 'Untitled';
   loadModel(want);
   refreshList(want);
-
-  // drag & drop import — only works when served by converter/import_server.py
-  const canImport = /^https?:$/.test(location.protocol);
   if (!canImport) {
     document.querySelector('#bar .hint').textContent =
       '— import : lance  python converter/import_server.py  et ouvre http://localhost:8080/';

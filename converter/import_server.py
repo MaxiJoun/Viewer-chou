@@ -1,10 +1,13 @@
 """
-import_server.py — sert le viewer ET permet d'importer un .abc par glisser-déposer.
+import_server.py — sert le viewer ET permet d'importer un modèle par glisser-déposer.
 
-    python converter/import_server.py [port]        # défaut 8080
+    python converter/import_server.py [port] [--single] [--fresh]
 
-Ouvre l'URL affichée, dépose un .abc sur la page : le serveur lance Blender en
-tâche de fond, convertit, et le viewer recharge le modèle.
+  --single  chaque import REMPLACE le précédent (jamais de liste qui s'accumule)
+  --fresh   vide viewer/models/ au démarrage du serveur
+
+Ouvre l'URL affichée, dépose un .abc / .chou / .usd / .blend sur la page : le
+serveur lance Blender en tâche de fond, convertit, et le viewer recharge le modèle.
 
 Blender doit être installé. Ordre de recherche de l'exécutable :
   1. variable d'env  BLENDER=/chemin/vers/blender
@@ -12,10 +15,11 @@ Blender doit être installé. Ordre de recherche de l'exécutable :
   3. chemins d'install classiques (Windows / macOS / Linux)
 
 Endpoints :
-  GET  /                     → viewer/index.html
-  GET  /models               → ["Untitled", ...]
-  POST /import?name=&decimate=&step=   (corps = octets du .abc)
-                             → {"name": "...", "frameCount": N}  |  {"error": "..."}
+  GET    /                     → viewer/index.html
+  GET    /models               → ["Untitled", ...]
+  POST   /import?name=&decimate=&step=   (corps = octets du fichier)
+                               → {"name": "...", "frameCount": N}  |  {"error": "..."}
+  DELETE /models/<nom>         → {"ok": true}
 """
 import http.server
 import socketserver
@@ -34,7 +38,12 @@ ROOT = os.path.abspath(os.path.join(HERE, "..", "viewer"))
 MODELS = os.path.join(ROOT, "models")
 CONVERTER = os.path.join(HERE, "scene_to_sequence.py")
 ALLOWED_EXT = (".abc", ".usd", ".usdc", ".usda", ".usdz", ".blend", ".chou")
-PORT = int(sys.argv[1]) if len(sys.argv) > 1 else 8080
+
+_argv = sys.argv[1:]
+SINGLE = "--single" in _argv
+FRESH = "--fresh" in _argv
+_ports = [a for a in _argv if a.isdigit()]
+PORT = int(_ports[0]) if _ports else 8080
 
 
 def find_blender():
@@ -97,6 +106,21 @@ class Handler(http.server.SimpleHTTPRequestHandler):
             return self._json(200, list_models())
         return super().do_GET()
 
+    def do_DELETE(self):
+        path = urllib.parse.urlparse(self.path).path.rstrip("/")
+        if path == "/models":                       # DELETE /models -> clear all
+            wipe_models()
+            write_models_json()
+            return self._json(200, {"ok": True, "cleared": True})
+        if path.startswith("/models/"):             # DELETE /models/<name>
+            name = safe_name(urllib.parse.unquote(path[len("/models/"):]))
+            d = os.path.join(MODELS, name)
+            if os.path.isdir(d):
+                shutil.rmtree(d, ignore_errors=True)
+            write_models_json()
+            return self._json(200, {"ok": True, "name": name})
+        return self._json(404, {"error": "not found"})
+
     def do_POST(self):
         parsed = urllib.parse.urlparse(self.path)
         if parsed.path != "/import":
@@ -144,8 +168,19 @@ class Handler(http.server.SimpleHTTPRequestHandler):
         except Exception as e:
             return self._json(500, {"error": f"pas de manifest : {e}"})
 
+        if SINGLE:
+            wipe_models(keep=name)
         write_models_json()
         return self._json(200, {"name": name, "frameCount": mani.get("frameCount", 0)})
+
+
+def wipe_models(keep=None):
+    if not os.path.isdir(MODELS):
+        return
+    for d in os.listdir(MODELS):
+        p = os.path.join(MODELS, d)
+        if d != keep and os.path.isdir(p):
+            shutil.rmtree(p, ignore_errors=True)
 
 
 def list_models():
@@ -177,13 +212,17 @@ def lan_ips():
 
 
 if __name__ == "__main__":
+    if FRESH:
+        wipe_models()
     write_models_json()
     print(f"viewer  : {ROOT}")
     print(f"blender : {BLENDER or 'INTROUVABLE — défnis BLENDER=...'}")
+    print(f"mode    : {'single (chaque import remplace)' if SINGLE else 'accumule'}"
+          f"{'  + fresh (models vidés au démarrage)' if FRESH else ''}")
     print(f"  local : http://localhost:{PORT}/")
     for ip in lan_ips():
         print(f"  LAN   : http://{ip}:{PORT}/")
-    print("Glisse un .abc sur la page pour l'importer. Ctrl+C pour arrêter.\n")
+    print("Glisse un fichier sur la page pour l'importer. Ctrl+C pour arrêter.\n")
     socketserver.TCPServer.allow_reuse_address = True
     with socketserver.ThreadingTCPServer(("0.0.0.0", PORT), Handler) as httpd:
         try:
