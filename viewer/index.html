@@ -115,7 +115,14 @@
     try {
       const endpoint = new URL('import?name=' + encodeURIComponent(file.name), location.href);
       const res = await fetch(endpoint, { method: 'POST', body: file });
-      const j = await res.json().catch(() => ({ error: `HTTP ${res.status}` }));
+      const ct = res.headers.get('content-type') || '';
+      if (!ct.includes('json')) {
+        // serve.py (or any static server) answers /import with an HTML error page
+        throw new Error(res.status === 501 || res.status === 405
+          ? "Ce serveur ne gère pas l'import.\nLance  python converter/import_server.py  (pas serve.py)."
+          : `Réponse inattendue du serveur (HTTP ${res.status}).`);
+      }
+      const j = await res.json();
       if (!res.ok) throw new Error(j.error + (j.log ? `\n\n${j.log}` : ''));
       say(`✓ ${j.name} — ${j.frameCount} frames`);
       await refreshList(j.name);
