@@ -128,8 +128,8 @@ def write_chou(filepath, objects=None, frame_start=None, frame_end=None):
     """Export `objects` (default: all scene meshes) to a .chou at `filepath`."""
     scene = bpy.context.scene
     view_layer = bpy.context.view_layer
-    meshes = [o for o in (objects or scene.objects) if o.type == "MESH"]
-    if not meshes:
+    candidates = [o for o in (objects or view_layer.objects) if o.type == "MESH"]
+    if not candidates:
         raise RuntimeError("no mesh objects to export")
 
     fs = scene.frame_start if frame_start is None else int(frame_start)
@@ -139,13 +139,26 @@ def write_chou(filepath, objects=None, frame_start=None, frame_end=None):
     tmp = tempfile.mkdtemp(prefix="chou_")
     abc_path = os.path.join(tmp, "geometry.abc")
 
-    prev_sel = [o for o in scene.objects if o.select_get()]
+    prev_sel = [o for o in view_layer.objects if o.select_get()]
     prev_active = view_layer.objects.active
     try:
-        for o in scene.objects:
-            o.select_set(False)
-        for o in meshes:
-            o.select_set(True)
+        for o in view_layer.objects:
+            try:
+                o.select_set(False)
+            except RuntimeError:
+                pass
+        # keep only meshes we can actually select (others are in excluded /
+        # disabled collections and can't be exported anyway)
+        meshes = []
+        for o in candidates:
+            try:
+                o.select_set(True)
+                meshes.append(o)
+            except RuntimeError:
+                pass
+        if not meshes:
+            raise RuntimeError("no selectable mesh objects — everything is in an "
+                               "excluded or disabled collection")
         view_layer.objects.active = meshes[0]
 
         bpy.ops.wm.alembic_export(
@@ -197,14 +210,14 @@ def write_chou(filepath, objects=None, frame_start=None, frame_end=None):
                 z.write(os.path.join(tmp, rel), rel)
     finally:
         shutil.rmtree(tmp, ignore_errors=True)
-        for o in scene.objects:
-            o.select_set(False)
-        for o in prev_sel:
-            try:
+        try:
+            for o in view_layer.objects:
+                o.select_set(False)
+            for o in prev_sel:
                 o.select_set(True)
-            except ReferenceError:
-                pass
-        view_layer.objects.active = prev_active
+            view_layer.objects.active = prev_active
+        except (ReferenceError, RuntimeError):
+            pass
 
     return filepath
 

@@ -90,7 +90,13 @@
   loadModel(want);
   refreshList(want);
 
-  // drag & drop import (needs import_server.py)
+  // drag & drop import — only works when served by converter/import_server.py
+  const canImport = /^https?:$/.test(location.protocol);
+  if (!canImport) {
+    document.querySelector('#bar .hint').textContent =
+      '— import : lance  python converter/import_server.py  et ouvre http://localhost:8080/';
+  }
+
   let depth = 0;
   addEventListener('dragenter', (e) => { e.preventDefault(); if (++depth === 1) drop.classList.add('on'); });
   addEventListener('dragover', (e) => e.preventDefault());
@@ -100,13 +106,16 @@
     const ok = /\.(chou|abc|usd|usdc|usda|usdz|blend)$/i;
     const file = [...e.dataTransfer.files].find((f) => ok.test(f.name));
     if (!file) return say('Formats acceptés : .chou .abc .usd .usdc .usda .usdz .blend', true);
+    if (!canImport) {
+      return say('Import indisponible ici (page statique).\n'
+        + 'Convertis en local : python converter/import_server.py  →  http://localhost:8080/', true);
+    }
 
     say(`Import de ${file.name}… (Blender convertit, ça peut prendre un moment)`);
     try {
-      const res = await fetch(`./import?name=${encodeURIComponent(file.name)}`, {
-        method: 'POST', body: file,
-      });
-      const j = await res.json();
+      const endpoint = new URL('import?name=' + encodeURIComponent(file.name), location.href);
+      const res = await fetch(endpoint, { method: 'POST', body: file });
+      const j = await res.json().catch(() => ({ error: `HTTP ${res.status}` }));
       if (!res.ok) throw new Error(j.error + (j.log ? `\n\n${j.log}` : ''));
       say(`✓ ${j.name} — ${j.frameCount} frames`);
       await refreshList(j.name);
