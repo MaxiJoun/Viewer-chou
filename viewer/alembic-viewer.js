@@ -398,21 +398,14 @@ class AlembicViewer extends HTMLElement {
 
   _frameView() {
     if (!this._geoms.length) return;
-    // frame the whole animation (union bbox): stable, no chasing.
-    // centre on the whole animation (stable, no chasing); size for the current
-    // frame so the subject stays a usable size even if the anim travels/expands.
-    let c;
-    const bb = this._manifest && this._manifest.bbox;
-    if (bb && Array.isArray(bb.min) && Array.isArray(bb.max)) {
-      c = new THREE.Vector3().fromArray(bb.min)
-        .add(new THREE.Vector3().fromArray(bb.max)).multiplyScalar(0.5);
-    } else {
-      c = this._frameCenter(this._state.frame, new THREE.Vector3());
-    }
-    const g0 = this._geoms[this._state.frame];
+    // Centre + size on the FIRST frame (the rest / start pose), and never chase.
+    // An anim that travels or explodes then spreads out from the centre of the
+    // screen — the natural framing. Reset view re-applies this.
+    const g0 = this._geoms[0];
     if (!g0.boundingBox) g0.computeBoundingBox();
+    const c = g0.boundingBox.getCenter(new THREE.Vector3());
     const frameR = 0.5 * g0.boundingBox.getSize(new THREE.Vector3()).length();
-    const radius = Math.max(frameR * 1.15, 1e-4);
+    const radius = Math.max(frameR * 1.3, 1e-4);
     this._camera.setFocalLength(this._state.focalMm);
     this._camera.updateProjectionMatrix();
     // clamp aspect: during first layout it can briefly be degenerate (0-width)
