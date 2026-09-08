@@ -32,21 +32,66 @@ def _safe(s):
     return "".join(c if (c.isalnum() or c in "-_.") else "_" for c in (s or "tex")) or "tex"
 
 
-def _save_image_png(img, dst):
-    """Save a (possibly packed / generated) image datablock to dst as PNG,
-    without mutating the original datablock."""
-    os.makedirs(os.path.dirname(dst), exist_ok=True)
+_WEB_IMG_EXT = (".png", ".jpg", ".jpeg", ".webp", ".gif", ".bmp")
+
+
+def _image_bytes(img):
+    """Return (ext, bytes) for an image datablock, ready to drop in the bundle.
+    Handles packed, on-disk and generated/render images. None if it can't."""
+    # 1. packed — the original file bytes live in packed_file.data
+    if img.packed_file and getattr(img.packed_file, "data", None):
+        ext = os.path.splitext(img.filepath or img.name)[1].lower()
+        if ext not in _WEB_IMG_EXT:
+            ext = ".png"
+        return ext, bytes(img.packed_file.data)
+    # 2. on disk — copy the file as-is (three.js loads jpg/png/webp fine)
     src = bpy.path.abspath(img.filepath) if img.filepath else ""
-    if src and os.path.isfile(src) and src.lower().endswith(".png") and not img.packed_file:
-        shutil.copyfile(src, dst)
-        return
-    tmp = img.copy()
+    if src and os.path.isfile(src):
+        ext = os.path.splitext(src)[1].lower()
+        if ext in _WEB_IMG_EXT:
+            with open(src, "rb") as f:
+                return ext, f.read()
+    # 3. generated / render result — save a PNG to a temp file, read it back
     try:
-        tmp.file_format = "PNG"
-        tmp.filepath_raw = dst
-        tmp.save()
-    finally:
-        bpy.data.images.remove(tmp)
+        d = tempfile.mkdtemp(prefix="chou_img_")
+        p = os.path.join(d, "img.png")
+        img.file_format = "PNG"
+        try:
+            img.save(filepath=p)          # Blender 3.x+
+        except TypeError:
+            img.filepath_raw = p
+            img.save()
+        with open(p, "rb") as f:
+            data = f.read()
+        shutil.rmtree(d, ignore_errors=True)
+        return ".png", data
+    except Exception as e:
+        print("chou: cannot read image '%s' (%s)" % (img.name, e))
+        return None
+
+
+# passthrough node types we can look "through" to find the real image
+_PASSTHRU = {
+    "MIX", "MIX_RGB", "GAMMA", "BRIGHTCONTRAST", "HUE_SAT", "INVERT",
+    "CURVE_RGB", "MAP_RANGE", "CLAMP", "SEPARATE_COLOR", "COMBINE_COLOR",
+}
+
+
+def _find_image_node(socket, _depth=0):
+    """Follow a linked socket back through passthrough nodes to the first
+    TEX_IMAGE node with an image. Returns that node or None."""
+    if socket is None or not socket.is_linked or _depth > 6:
+        return None
+    node = socket.links[0].from_node
+    if node.type == "TEX_IMAGE":
+        return node if node.image else None
+    if node.type in _PASSTHRU:
+        for inp in node.inputs:
+            if inp.is_linked and inp.type in ("RGBA", "VALUE", "VECTOR"):
+                hit = _find_image_node(inp, _depth + 1)
+                if hit:
+                    return hit
+    return None
 
 
 # ----------------------------------------------------------------- material <-> json
@@ -72,26 +117,22 @@ def _color_socket(mat):
 
 
 def _mat_to_entry(mat):
-    """bpy Material -> ({name, baseColor[, baseColorTexture]}, {relpath: Image})"""
+    """bpy Material -> ({name, baseColor}, image_or_None).
+    The caller packs the image and fills in entry['baseColorTexture']."""
     entry = {"name": mat.name, "baseColor": [0.8, 0.8, 0.8, 1.0]}
-    images = {}
     sock = _color_socket(mat)
     if sock is None:
         c = mat.diffuse_color
         entry["baseColor"] = [c[0], c[1], c[2], c[3] if len(c) > 3 else 1.0]
-        return entry, images
+        return entry, None
 
-    if sock.is_linked and sock.links[0].from_node.type == "TEX_IMAGE" and sock.links[0].from_node.image:
-        img = sock.links[0].from_node.image
-        rel = "textures/" + _safe(img.name)
-        if not rel.lower().endswith(".png"):
-            rel += ".png"
-        images[rel] = img
-        entry["baseColorTexture"] = rel
-    elif not sock.is_linked:
-        v = sock.default_value
-        entry["baseColor"] = [v[0], v[1], v[2], v[3] if len(v) > 3 else 1.0]
-    return entry, images
+    if sock.is_linked:
+        node = _find_image_node(sock)
+        return entry, (node.image if node else None)
+
+    v = sock.default_value
+    entry["baseColor"] = [v[0], v[1], v[2], v[3] if len(v) > 3 else 1.0]
+    return entry, None
 
 
 def _entry_to_material(md, base_dir):
@@ -167,9 +208,11 @@ def write_chou(filepath, objects=None, frame_start=None, frame_end=None):
             vcolors=True, face_sets=True,
         )
 
-        mats, images = [], {}
+        mats = []
         seen = set()
         assigns = {}
+        tex_blobs = {}          # bundle relpath -> bytes
+        tex_by_image = {}       # image datablock -> bundle relpath (dedupe)
         for ob in meshes:
             slots = []
             for slot in ob.material_slots:
@@ -177,18 +220,21 @@ def write_chou(filepath, objects=None, frame_start=None, frame_end=None):
                 slots.append(mat.name if mat else None)
                 if mat and mat.name not in seen:
                     seen.add(mat.name)
-                    entry, imgs = _mat_to_entry(mat)
+                    entry, img = _mat_to_entry(mat)
+                    if img is not None:
+                        rel = tex_by_image.get(img)
+                        if rel is None:
+                            got = _image_bytes(img)
+                            if got:
+                                ext, data = got
+                                base = _safe(os.path.splitext(img.name)[0])
+                                rel = "textures/%s%s" % (base, ext)
+                                tex_blobs[rel] = data
+                                tex_by_image[img] = rel
+                        if rel:
+                            entry["baseColorTexture"] = rel
                     mats.append(entry)
-                    images.update(imgs)
             assigns[ob.name] = slots
-
-        packed = []
-        for rel, img in images.items():
-            try:
-                _save_image_png(img, os.path.join(tmp, rel))
-                packed.append(rel)
-            except Exception as e:
-                print("chou: skipped texture %s (%s)" % (rel, e))
 
         meta = {
             "format": "chou", "version": CHOU_VERSION,
@@ -206,8 +252,8 @@ def write_chou(filepath, objects=None, frame_start=None, frame_end=None):
         with zipfile.ZipFile(filepath, "w", zipfile.ZIP_DEFLATED) as z:
             z.write(os.path.join(tmp, "chou.json"), "chou.json")
             z.write(abc_path, "geometry.abc")
-            for rel in packed:
-                z.write(os.path.join(tmp, rel), rel)
+            for rel, data in tex_blobs.items():
+                z.writestr(rel, data)
     finally:
         shutil.rmtree(tmp, ignore_errors=True)
         try:
@@ -240,9 +286,10 @@ def read_chou(filepath, into_temp=None):
     new_objs = [o for o in scene.objects if o not in before]
 
     # Alembic import re-creates placeholder slots from face sets and keeps the
-    # per-face material_index. Rename those out of the way so our rebuilt
-    # materials keep their real names, then swap slot-by-slot WITHOUT clearing
-    # the list (materials.clear() would reset every polygon's material_index).
+    # per-face material_index — BUT the slot ORDER may differ from export
+    # (face sets iterate by name, not by original slot index). So we match each
+    # placeholder slot to a .chou material BY NAME, not by position, and swap
+    # in place (materials.clear() would wipe every polygon's material_index).
     wanted_names = {md["name"] for md in meta.get("materials", [])}
     for m in list(bpy.data.materials):
         if m.name in wanted_names:  # placeholder created by alembic_import
@@ -256,18 +303,20 @@ def read_chou(filepath, into_temp=None):
     for o in new_objs:
         if o.type != "MESH":
             continue
-        want = assigns.get(o.name) or assigns.get(o.name.rsplit(".", 1)[0])
-        if not want:
-            continue
         slots = o.data.materials
-        for i, name in enumerate(want):
-            mat = matmap.get(name) if name else None
-            if i < len(slots):
-                slots[i] = mat          # replace in place -> material_index kept
-            else:
-                slots.append(mat)
-        while len(slots) > len(want):
-            slots.pop()
+        fallback = assigns.get(o.name) or assigns.get(o.name.rsplit(".", 1)[0]) or []
+        for i in range(len(slots)):
+            cur = slots[i]
+            name = None
+            if cur is not None:
+                name = cur.name[:-8] if cur.name.endswith(".abcslot") else cur.name
+            if name not in matmap and i < len(fallback):
+                name = fallback[i]
+            slots[i] = matmap.get(name) if name in matmap else slots[i]
+        # object with no face-set slots at all -> use the assignment list
+        if len(slots) == 0 and fallback:
+            for name in fallback:
+                slots.append(matmap.get(name) if name else None)
 
     if "frameStart" in meta:
         scene.frame_start = int(meta["frameStart"])

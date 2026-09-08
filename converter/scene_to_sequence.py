@@ -80,9 +80,12 @@ def derive_range(scene, meshes):
     return 0, 0  # static
 
 
+import chou_core  # noqa: E402  (blender_addon/chou_io on sys.path)
+
+
 def extract_material(mat):
-    """Flat material: just a base colour (or, later, a base-colour texture).
-    Reads Principled 'Base Color', else Emission 'Color', else viewport colour."""
+    """Flat material: base colour, or a base-colour texture image.
+    Returns ({name, baseColor}, bpy.types.Image | None)."""
     out = {"name": mat.name, "baseColor": [0.8, 0.8, 0.8, 1.0]}
     nt = getattr(mat, "node_tree", None)
     sock = None
@@ -94,13 +97,13 @@ def extract_material(mat):
     if sock is None:
         c = mat.diffuse_color
         out["baseColor"] = [c[0], c[1], c[2], c[3] if len(c) > 3 else 1.0]
-    elif sock.is_linked and sock.links[0].from_node.type == "TEX_IMAGE" and sock.links[0].from_node.image:
-        # TODO: pack tex.image to <outdir>/textures/*.png + set out["baseColorTexture"]
-        pass
-    else:
-        v = sock.default_value
-        out["baseColor"] = [v[0], v[1], v[2], v[3] if len(v) > 3 else 1.0]
-    return out
+        return out, None
+    if sock.is_linked:
+        node = chou_core._find_image_node(sock)
+        return out, (node.image if node else None)
+    v = sock.default_value
+    out["baseColor"] = [v[0], v[1], v[2], v[3] if len(v) > 3 else 1.0]
+    return out, None
 
 
 def main():
@@ -126,17 +129,36 @@ def main():
             m.decimate_type = "COLLAPSE"
             m.ratio = max(1e-4, args.decimate)
 
-    # global material table (by name) across every mesh
+    # global material table (by name) across every mesh, packing textures
     mat_index = {}
     materials = []
+    tex_by_image = {}
     for o in meshes:
         for slot in o.material_slots:
-            if slot.material and slot.material.name not in mat_index:
-                mat_index[slot.material.name] = len(materials)
-                materials.append(extract_material(slot.material))
+            m = slot.material
+            if not m or m.name in mat_index:
+                continue
+            mat_index[m.name] = len(materials)
+            entry, img = extract_material(m)
+            if img is not None:
+                rel = tex_by_image.get(img)
+                if rel is None:
+                    got = chou_core._image_bytes(img)
+                    if got:
+                        ext, data = got
+                        base = "".join(ch if (ch.isalnum() or ch in "-_.") else "_"
+                                       for ch in os.path.splitext(img.name)[0]) or "tex"
+                        rel = "textures/%s%s" % (base, ext)
+                        p = os.path.join(outdir, rel)
+                        os.makedirs(os.path.dirname(p), exist_ok=True)
+                        with open(p, "wb") as fh:
+                            fh.write(data)
+                        tex_by_image[img] = rel
+                if rel:
+                    entry["baseColorTexture"] = rel
+            materials.append(entry)
     if not materials:
-        materials = [{"name": "default", "baseColor": [0.79, 0.8, 0.82, 1.0],
-                      "metallic": 0.0, "roughness": 0.62}]
+        materials = [{"name": "default", "baseColor": [0.79, 0.8, 0.82, 1.0]}]
 
     fs = args.frame_start if args.frame_start is not None else None
     fe = args.frame_end if args.frame_end is not None else None
@@ -157,76 +179,78 @@ def main():
         scene.frame_set(f)
         deps.update()
 
-        pos = array.array("f")
-        nrm = array.array("f")
-        # collect triangles as (globalMatIndex, (a,b,c)) then sort by material
-        tris = []
-        base = 0
+        # un-indexed: one entry per triangle corner, so per-corner UVs are exact.
+        # corners = list of (globalMatIndex, [9 pos], [9 nrm], [6 uv])
+        corners = []
         for o in meshes:
             ev = o.evaluated_get(deps)
             me = ev.to_mesh()
             me.transform(o.matrix_world)
             me.calc_loop_triangles()
             try:
-                vn = me.vertex_normals
-                normals = [n.vector.copy() for n in vn]
+                vnorm = me.vertex_normals
             except AttributeError:
-                normals = [v.normal.copy() for v in me.vertices]
+                vnorm = None
+            uvdata = me.uv_layers.active.data if me.uv_layers.active else None
+            verts = me.vertices
 
-            # map this object's local slot -> global material index
-            local_to_global = []
-            for slot in o.material_slots:
-                gi = mat_index.get(slot.material.name, 0) if slot.material else 0
-                local_to_global.append(gi)
-            if not local_to_global:
-                local_to_global = [0]
-
-            for vi, v in enumerate(me.vertices):
-                co = v.co
-                pos.extend((co.x, co.y, co.z))
-                n = normals[vi]
-                nrm.extend((n.x, n.y, n.z))
-                if co.x < bbmin[0]: bbmin[0] = co.x
-                if co.y < bbmin[1]: bbmin[1] = co.y
-                if co.z < bbmin[2]: bbmin[2] = co.z
-                if co.x > bbmax[0]: bbmax[0] = co.x
-                if co.y > bbmax[1]: bbmax[1] = co.y
-                if co.z > bbmax[2]: bbmax[2] = co.z
+            local_to_global = [mat_index.get(s.material.name, 0) if s.material else 0
+                               for s in o.material_slots] or [0]
 
             for lt in me.loop_triangles:
                 gi = local_to_global[min(lt.material_index, len(local_to_global) - 1)]
-                a, b, c = lt.vertices
-                tris.append((gi, (base + a, base + b, base + c)))
-            base += len(me.vertices)
+                P, N, U = [], [], []
+                for k in range(3):
+                    vi = lt.vertices[k]
+                    li = lt.loops[k]
+                    co = verts[vi].co
+                    P.extend((co.x, co.y, co.z))
+                    nv = vnorm[vi].vector if vnorm is not None else verts[vi].normal
+                    N.extend((nv.x, nv.y, nv.z))
+                    if uvdata is not None:
+                        uv = uvdata[li].uv
+                        U.extend((uv.x, uv.y))
+                    else:
+                        U.extend((0.0, 0.0))
+                    if co.x < bbmin[0]: bbmin[0] = co.x
+                    if co.y < bbmin[1]: bbmin[1] = co.y
+                    if co.z < bbmin[2]: bbmin[2] = co.z
+                    if co.x > bbmax[0]: bbmax[0] = co.x
+                    if co.y > bbmax[1]: bbmax[1] = co.y
+                    if co.z > bbmax[2]: bbmax[2] = co.z
+                corners.append((gi, P, N, U))
             ev.to_mesh_clear()
 
-        tris.sort(key=lambda t: t[0])
-        idx = array.array("I")
+        corners.sort(key=lambda c: c[0])
+        pos = array.array("f")
+        nrm = array.array("f")
+        uv = array.array("f")
         groups = []
         cur_mat = None
         run_start = 0
-        for gi, (a, b, c) in tris:
+        for gi, P, N, U in corners:
             if gi != cur_mat:
                 if cur_mat is not None:
-                    groups.append([run_start, len(idx) - run_start, cur_mat])
+                    groups.append([run_start, len(pos) // 3 - run_start, cur_mat])
                 cur_mat = gi
-                run_start = len(idx)
-            idx.extend((a, b, c))
+                run_start = len(pos) // 3
+            pos.extend(P)
+            nrm.extend(N)
+            uv.extend(U)
         if cur_mat is not None:
-            groups.append([run_start, len(idx) - run_start, cur_mat])
+            groups.append([run_start, len(pos) // 3 - run_start, cur_mat])
 
-        vcount = len(pos) // 3
-        tcount = len(idx) // 3
+        vcount = len(pos) // 3          # == 3 * triangleCount (un-indexed)
         rel = "frames/frame_%04d.bin" % i
         with open(os.path.join(outdir, rel), "wb") as fh:
             if sys.byteorder != "little":
-                pos.byteswap(); nrm.byteswap(); idx.byteswap()
-            fh.write(pos.tobytes()); fh.write(nrm.tobytes()); fh.write(idx.tobytes())
+                pos.byteswap(); nrm.byteswap(); uv.byteswap()
+            fh.write(pos.tobytes()); fh.write(nrm.tobytes()); fh.write(uv.tobytes())
 
         frames_meta.append({"file": rel, "vertexCount": vcount,
-                            "triangleCount": tcount, "groups": groups})
-        print("frame %d (%d/%d) v=%d t=%d groups=%d"
-              % (f, i + 1, len(out_frames), vcount, tcount, len(groups)))
+                            "triangleCount": vcount // 3, "groups": groups})
+        print("frame %d (%d/%d) corners=%d groups=%d"
+              % (f, i + 1, len(out_frames), vcount, len(groups)))
 
     manifest = {
         "name": name,
@@ -236,7 +260,9 @@ def main():
         "frameCount": len(out_frames),
         "decimate": args.decimate,
         "bbox": {"min": bbmin, "max": bbmax},
-        "layout": "pos:f32*3N | nrm:f32*3N | idx:u32*3T  (little-endian, world space)",
+        "binLayout": "corners_pos_nrm_uv",
+        "layout": "un-indexed: pos:f32*3N | nrm:f32*3N | uv:f32*2N  (N = 3*triangleCount, little-endian, world space)",
+        "attributes": {"uv": True},
         "materials": materials,
         "frames": frames_meta,
     }

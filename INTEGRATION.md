@@ -70,26 +70,30 @@ NAME/
 
 ### frame_XXXX.bin  (little-endian, sans compression)
 
-Concaténation brute de 3 blocs, tailles déduites du manifest :
+Deux layouts selon `manifest.binLayout` :
 
-| bloc      | type      | longueur              |
-|-----------|-----------|-----------------------|
-| positions | `float32` | `3 × vertexCount`     |
-| normals   | `float32` | `3 × vertexCount`     |
-| indices   | `uint32`  | `3 × triangleCount`   |
+**`"corners_pos_nrm_uv"`** (scene_to_sequence.py — non-indexé, `N = 3 × triangleCount` coins) :
 
-Décodage de référence (c'est exactement ce que fait le composant) :
+| bloc      | type      | longueur     |
+|-----------|-----------|--------------|
+| positions | `float32` | `3 × N`      |
+| normals   | `float32` | `3 × N`      |
+| uv        | `float32` | `2 × N`      |
 
 ```js
-const v = fm.vertexCount, t = fm.triangleCount;
+const n = fm.vertexCount;            // = 3 * triangleCount
 let o = 0;
-const position = new Float32Array(buf, o, v * 3); o += v * 12;
-const normal   = new Float32Array(buf, o, v * 3); o += v * 12;
-const index    = new Uint32Array(buf, o, t * 3);
+const position = new Float32Array(buf, o, n * 3); o += n * 12;
+const normal   = new Float32Array(buf, o, n * 3); o += n * 12;
+const uv       = new Float32Array(buf, o, n * 2);
+// pas d'index ; groups = [vertexStart, vertexCount, materialIndex]
 ```
 
-> Pas d'UV / textures pour l'instant (preview couleur unie + wireframe). Ajout
-> prévu : bloc `uv:f32*2N` + `baseColorTexture` dans `materials`.
+**Absent** (legacy, abc_to_sequence.py — indexé) : `pos:f32*3V | nrm:f32*3V | idx:u32*3T`,
+`groups = [indexStart, indexCount, materialIndex]`.
+
+Dans les deux cas la géométrie est en **espace monde** et triée par matériau.
+`baseColorTexture` (chemin relatif, ex. `textures/skin.jpg`) est servi à côté du manifest.
 
 ---
 

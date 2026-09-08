@@ -277,7 +277,7 @@ class AlembicViewer extends HTMLElement {
           if (!r.ok) throw new Error(`${fm.file} ${r.status}`);
           return r.arrayBuffer();
         });
-        geoms.push(buildGeometry(buf, fm));
+        geoms.push(buildGeometry(buf, fm, manifest));
         this._msg(`chargement ${i + 1}/${manifest.frames.length}…`);
       }
 
@@ -286,10 +286,10 @@ class AlembicViewer extends HTMLElement {
       this._manifest = manifest;
       if (!this.hasAttribute('fps')) this._state.fps = manifest.fps || 24;
 
-      // materials from the manifest (flat PBR); fall back to the neutral grey
-      this._materials?.forEach((m) => m.dispose());
+      // materials from the manifest (flat); fall back to the neutral grey
+      this._materials?.forEach((m) => { m.map?.dispose(); m.dispose(); });
       if (Array.isArray(manifest.materials) && manifest.materials.length) {
-        this._materials = manifest.materials.map(toFlatMat);
+        this._materials = manifest.materials.map((m) => toFlatMat(m, base));
         this._mesh.material = this._materials.length > 1 ? this._materials : this._materials[0];
       } else {
         this._materials = null;
@@ -302,7 +302,9 @@ class AlembicViewer extends HTMLElement {
 
       this._state.frame = 0;
       this._setFrame(0);
+      this._resize();
       this._frameView();
+      this._needsReframe = true;   // _resize() re-frames once real layout lands
       this.setWireframe(this._state.wire);
       this._state.ready = true;
       this._msg('');
@@ -359,12 +361,16 @@ class AlembicViewer extends HTMLElement {
   }
 
   _resize() {
-    const w = this.clientWidth || 1, h = this.clientHeight || 1;
+    const w = this.clientWidth, h = this.clientHeight;
+    if (!w || !h) return;                 // not laid out yet — skip
     this._renderer.setSize(w, h, false);
     this._camera.aspect = w / h;
     this._camera.setFocalLength(this._state.focalMm);
     this._camera.updateProjectionMatrix();
     this.classList.toggle('av-compact', w < 520);
+    // first real size after a load → re-frame (the load-time framing may have
+    // run before layout settled)
+    if (this._needsReframe) { this._needsReframe = false; this._frameView(); }
   }
 
   _frameCenter(i, out) {
@@ -392,12 +398,28 @@ class AlembicViewer extends HTMLElement {
 
   _frameView() {
     if (!this._geoms.length) return;
-    const c = this._frameCenter(this._state.frame, new THREE.Vector3());
-    const radius = Math.max(0.5 * this._maxDiag, 1e-4);
+    // frame the whole animation (union bbox): stable, no chasing.
+    // centre on the whole animation (stable, no chasing); size for the current
+    // frame so the subject stays a usable size even if the anim travels/expands.
+    let c;
+    const bb = this._manifest && this._manifest.bbox;
+    if (bb && Array.isArray(bb.min) && Array.isArray(bb.max)) {
+      c = new THREE.Vector3().fromArray(bb.min)
+        .add(new THREE.Vector3().fromArray(bb.max)).multiplyScalar(0.5);
+    } else {
+      c = this._frameCenter(this._state.frame, new THREE.Vector3());
+    }
+    const g0 = this._geoms[this._state.frame];
+    if (!g0.boundingBox) g0.computeBoundingBox();
+    const frameR = 0.5 * g0.boundingBox.getSize(new THREE.Vector3()).length();
+    const radius = Math.max(frameR * 1.15, 1e-4);
     this._camera.setFocalLength(this._state.focalMm);
     this._camera.updateProjectionMatrix();
+    // clamp aspect: during first layout it can briefly be degenerate (0-width)
+    const aspect = (this._camera.aspect > 0.05 && this._camera.aspect < 20)
+      ? this._camera.aspect : 1;
     const vFit = radius / Math.tan(THREE.MathUtils.degToRad(this._camera.fov * 0.5));
-    const hFit = vFit / Math.min(this._camera.aspect, 1);
+    const hFit = vFit / Math.min(aspect, 1);
     const dist = 1.25 * Math.max(vFit, hFit);
     this._controls.target.copy(c);
     this._camera.position.copy(c).addScaledVector(new THREE.Vector3(0.6, 0.4, 1).normalize(), dist);
@@ -573,9 +595,9 @@ function dir(color, intensity, x, y, z) {
 }
 
 // manifest material entry -> FLAT (unlit) material. .chou / USD materials are
-// deliberately flat: a base colour (or, later, a base-colour texture), no PBR.
-// baseColor is linear (from Blender).
-function toFlatMat(m) {
+// deliberately flat: a base colour or a base-colour texture, no PBR.
+// baseColor is linear (from Blender); baseColorTexture is relative to `baseUrl`.
+function toFlatMat(m, baseUrl) {
   const bc = m.baseColor || [0.8, 0.8, 0.8, 1];
   const col = new THREE.Color();
   if (col.setRGB.length >= 4) col.setRGB(bc[0], bc[1], bc[2], THREE.LinearSRGBColorSpace);
@@ -583,20 +605,52 @@ function toFlatMat(m) {
   const mat = new THREE.MeshBasicMaterial({ color: col });
   if (bc[3] != null && bc[3] < 1) { mat.transparent = true; mat.opacity = bc[3]; }
   mat.name = m.name || '';
+
+  if (m.baseColorTexture && baseUrl != null) {
+    const url = `${baseUrl}/${m.baseColorTexture}`;
+    new THREE.TextureLoader().load(
+      url,
+      (tex) => {
+        tex.colorSpace = THREE.SRGBColorSpace;
+        tex.anisotropy = 4;
+        mat.map = tex;
+        mat.color.setRGB(1, 1, 1);   // let the texture show through
+        mat.needsUpdate = true;
+      },
+      undefined,
+      () => console.warn('[alembic-viewer] texture introuvable :', url),
+    );
+  }
   return mat;
 }
 
-function buildGeometry(buf, fm) {
-  const v = fm.vertexCount | 0, t = fm.triangleCount | 0;
-  let o = 0;
-  const position = new Float32Array(buf, o, v * 3); o += v * 12;
-  const normal = new Float32Array(buf, o, v * 3); o += v * 12;
-  const index = new Uint32Array(buf, o, t * 3);
+function buildGeometry(buf, fm, manifest) {
   const g = new THREE.BufferGeometry();
-  g.setAttribute('position', new THREE.BufferAttribute(position, 3));
-  g.setAttribute('normal', new THREE.BufferAttribute(normal, 3));
-  g.setIndex(new THREE.BufferAttribute(index, 1));
-  // per-material face groups: [indexStart, indexCount, materialIndex]
+
+  if (manifest && manifest.binLayout === 'corners_pos_nrm_uv') {
+    // un-indexed: N = 3 * triangleCount corners, pos + nrm + uv
+    const n = fm.vertexCount | 0;
+    let o = 0;
+    const position = new Float32Array(buf, o, n * 3); o += n * 12;
+    const normal = new Float32Array(buf, o, n * 3); o += n * 12;
+    const uv = new Float32Array(buf, o, n * 2);
+    g.setAttribute('position', new THREE.BufferAttribute(position, 3));
+    g.setAttribute('normal', new THREE.BufferAttribute(normal, 3));
+    g.setAttribute('uv', new THREE.BufferAttribute(uv, 2));
+  } else {
+    // legacy indexed: pos + nrm + u32 index
+    const v = fm.vertexCount | 0, t = fm.triangleCount | 0;
+    let o = 0;
+    const position = new Float32Array(buf, o, v * 3); o += v * 12;
+    const normal = new Float32Array(buf, o, v * 3); o += v * 12;
+    const index = new Uint32Array(buf, o, t * 3);
+    g.setAttribute('position', new THREE.BufferAttribute(position, 3));
+    g.setAttribute('normal', new THREE.BufferAttribute(normal, 3));
+    g.setIndex(new THREE.BufferAttribute(index, 1));
+  }
+
+  // per-material groups: [start, count, materialIndex] — already in the unit
+  // addGroup() wants (index offsets when indexed, vertex offsets when not)
   if (Array.isArray(fm.groups) && fm.groups.length) {
     for (const [start, count, mi] of fm.groups) g.addGroup(start, count, mi);
   }

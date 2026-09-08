@@ -84,8 +84,10 @@ studio handoff file; the per-frame sequence is what the viewer loads.
   texture, no metallic / roughness / normal, no light response. On import into
   Blender they are rebuilt as an **Emission** shader (flat there too); on the web
   the viewer uses an unlit material.
-- Base-colour **textures** are packed if present (`textures/*.png`). Other maps
-  are out of scope on purpose.
+- Base-colour **textures** are packed into `textures/` (original format kept —
+  jpg/png/webp — three.js loads them fine). Other maps are out of scope on purpose.
+- Multi-material meshes: the reader matches face-set slots to `.chou` materials
+  **by name**, not by index (Alembic reorders face sets), so assignments survive.
 - `chou_core` runs inside Blender (needs `bpy`) for both read and write — it uses
   Blender's Alembic import/export and material nodes.
 - The look is **constant over the sequence** (Alembic carries no shading anim).
