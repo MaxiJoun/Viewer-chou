@@ -1,0 +1,120 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>WEB_ALEMBIC — viewer</title>
+<style>
+  :root { color-scheme: dark; }
+  html, body { margin: 0; height: 100%; background: #16161A; overflow: hidden;
+               font: 13px system-ui, sans-serif; color: #e7e7ec; }
+  alembic-viewer { position: fixed; inset: 0; }
+
+  /* model picker */
+  #bar { position: fixed; left: 50%; top: 14px; transform: translateX(-50%);
+         z-index: 5; display: flex; gap: 8px; align-items: center;
+         background: rgba(20,20,24,.72); border: 1px solid rgba(255,255,255,.09);
+         padding: 6px 10px; border-radius: 999px; backdrop-filter: blur(10px); }
+  #bar select { background: #1c1c22; color: #e7e7ec; border: 1px solid #333;
+                border-radius: 6px; padding: 4px 8px; font: inherit; }
+  #bar .hint { color: #9a9aa6; }
+  #bar b { color: #cfe0ff; }
+
+  /* drop overlay */
+  #drop { position: fixed; inset: 0; z-index: 20; display: none;
+          place-items: center; background: rgba(10,12,20,.72);
+          backdrop-filter: blur(2px); border: 2px dashed #5B9CFF; }
+  #drop.on { display: grid; }
+  #drop div { font-size: 18px; color: #cfe0ff; }
+
+  #toast { position: fixed; left: 50%; bottom: 20px; transform: translateX(-50%);
+           z-index: 25; background: rgba(20,20,24,.92); border: 1px solid rgba(255,255,255,.12);
+           padding: 10px 16px; border-radius: 10px; display: none; max-width: 70ch;
+           white-space: pre-wrap; }
+  #toast.on { display: block; }
+  #toast.err { color: #ff9090; }
+</style>
+<script type="module" src="./alembic-viewer.js"></script>
+</head>
+<body>
+
+<div id="bar">
+  <label>modèle
+    <select id="pick"></select>
+  </label>
+  <span class="hint">— ou glisse un <b>.chou</b> / <b>.abc</b> / <b>.usd(c)</b> sur la page</span>
+</div>
+
+<alembic-viewer id="v" autoplay></alembic-viewer>
+
+<div id="drop"><div>Déposer le .abc pour l'importer</div></div>
+<div id="toast"></div>
+
+<script type="module">
+  const v = document.getElementById('v');
+  const pick = document.getElementById('pick');
+  const drop = document.getElementById('drop');
+  const toast = document.getElementById('toast');
+
+  const say = (msg, err = false) => {
+    toast.textContent = msg;
+    toast.classList.toggle('err', err);
+    toast.classList.add('on');
+    if (!err) setTimeout(() => toast.classList.remove('on'), 2500);
+  };
+
+  function loadModel(name) {
+    v.setAttribute('src', `./models/${name}/manifest.json`);
+    const u = new URL(location); u.searchParams.set('model', name); history.replaceState(0, '', u);
+  }
+
+  async function refreshList(select) {
+    // import_server.py exposes /models ; a static host (GitHub Pages) has models.json
+    let names = null;
+    for (const url of ['./models', './models.json']) {
+      try {
+        const r = await fetch(url, { cache: 'no-store' });
+        names = r.ok ? await r.json() : null;
+      } catch { names = null; }
+      if (Array.isArray(names)) break;
+    }
+    if (!Array.isArray(names)) return;
+    pick.innerHTML = names.map((n) => `<option>${n}</option>`).join('');
+    if (select) pick.value = select;
+  }
+
+  pick.addEventListener('change', () => loadModel(pick.value));
+
+  // initial model
+  const want = new URLSearchParams(location.search).get('model') || 'Untitled';
+  loadModel(want);
+  refreshList(want);
+
+  // drag & drop import (needs import_server.py)
+  let depth = 0;
+  addEventListener('dragenter', (e) => { e.preventDefault(); if (++depth === 1) drop.classList.add('on'); });
+  addEventListener('dragover', (e) => e.preventDefault());
+  addEventListener('dragleave', () => { if (--depth <= 0) { depth = 0; drop.classList.remove('on'); } });
+  addEventListener('drop', async (e) => {
+    e.preventDefault(); depth = 0; drop.classList.remove('on');
+    const ok = /\.(chou|abc|usd|usdc|usda|usdz|blend)$/i;
+    const file = [...e.dataTransfer.files].find((f) => ok.test(f.name));
+    if (!file) return say('Formats acceptés : .chou .abc .usd .usdc .usda .usdz .blend', true);
+
+    say(`Import de ${file.name}… (Blender convertit, ça peut prendre un moment)`);
+    try {
+      const res = await fetch(`./import?name=${encodeURIComponent(file.name)}`, {
+        method: 'POST', body: file,
+      });
+      const j = await res.json();
+      if (!res.ok) throw new Error(j.error + (j.log ? `\n\n${j.log}` : ''));
+      say(`✓ ${j.name} — ${j.frameCount} frames`);
+      await refreshList(j.name);
+      loadModel(j.name);
+    } catch (err) {
+      say(`Échec import : ${err.message}`, true);
+    }
+  });
+</script>
+</body>
+</html>

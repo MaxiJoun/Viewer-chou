@@ -1,0 +1,77 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>alembic-viewer embed</title>
+<style>
+  :root { color-scheme: dark; }
+  html, body { margin: 0; height: 100%; background: #16161A; overflow: hidden; }
+  alembic-viewer { position: fixed; inset: 0; }
+</style>
+<script type="module" src="./alembic-viewer.js"></script>
+</head>
+<body>
+<alembic-viewer id="v"></alembic-viewer>
+<script type="module">
+/*
+ * iframe host for <alembic-viewer>.
+ *
+ * URL params:
+ *   src        (required) URL to manifest.json  — may be absolute (cross-origin needs CORS)
+ *   accent     UI accent colour
+ *   background 3D backdrop colour
+ *   controls   full | minimal | none
+ *   autoplay   1 to start playing
+ *   loop       0 to disable looping
+ *
+ * postMessage bridge (all messages carry { source: 'alembic-viewer' }):
+ *
+ *   parent -> iframe   { source:'alembic-viewer', type:'command', id?, name, args:[] }
+ *     name ∈ play | pause | toggle | seek | seekTime | setFocalLength |
+ *            setWireframe | resetView | getState | screenshot | load
+ *     screenshot replies { type:'response', id, name:'screenshot', dataUrl }
+ *     getState   replies { type:'response', id, name:'getState', state }
+ *
+ *   iframe -> parent   { source:'alembic-viewer', type:'event', name, detail }
+ *     name ∈ ready | frame | play | pause | focal | wireframe | error
+ */
+const p = new URLSearchParams(location.search);
+const v = document.getElementById('v');
+
+for (const k of ['accent', 'background', 'controls']) {
+  if (p.has(k)) v.setAttribute(k, p.get(k));
+}
+if (p.get('autoplay') === '1') v.setAttribute('autoplay', '');
+if (p.get('loop') === '0') v.setAttribute('loop', 'false');
+if (p.get('src')) v.setAttribute('src', p.get('src'));
+
+const post = (msg) => parent && parent.postMessage({ source: 'alembic-viewer', ...msg }, '*');
+
+for (const name of ['ready', 'frame', 'play', 'pause', 'focal', 'wireframe', 'error']) {
+  v.addEventListener('av-' + name, (e) => post({ type: 'event', name, detail: e.detail || null }));
+}
+
+addEventListener('message', async (ev) => {
+  const d = ev.data;
+  if (!d || d.source !== 'alembic-viewer' || d.type !== 'command') return;
+  const { id, name, args = [] } = d;
+  try {
+    if (name === 'screenshot') {
+      const blob = await v.screenshot(args[0] || {});
+      const dataUrl = await new Promise((res) => {
+        const r = new FileReader(); r.onload = () => res(r.result); r.readAsDataURL(blob);
+      });
+      return post({ type: 'response', id, name, dataUrl });
+    }
+    if (name === 'getState') return post({ type: 'response', id, name, state: v.getState() });
+    if (typeof v[name] === 'function') v[name](...args);
+  } catch (err) {
+    post({ type: 'event', name: 'error', detail: { message: String(err && err.message || err) } });
+  }
+});
+
+post({ type: 'event', name: 'embed-ready', detail: null });
+</script>
+</body>
+</html>

@@ -1,0 +1,55 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>alembic-viewer — plain HTML</title>
+<style>
+  body { margin: 0; background: #0f0f12; font: 14px system-ui; color: #ddd; }
+  .stage { height: 70vh; margin: 16px; border-radius: 12px; overflow: hidden; }
+  .row { margin: 0 16px; display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+  button { padding: 6px 12px; border-radius: 8px; border: 1px solid #333; background: #1c1c22; color: #ddd; cursor: pointer; }
+  code { color: #8fb6ff; }
+</style>
+<!-- 1. load the component (keep vendor/ next to alembic-viewer.js) -->
+<script type="module" src="../alembic-viewer.js"></script>
+</head>
+<body>
+
+<!-- 2. drop the element -->
+<div class="stage">
+  <alembic-viewer id="v"
+     src="../models/Untitled/manifest.json"
+     accent="#5B9CFF"
+     autoplay loop></alembic-viewer>
+</div>
+
+<!-- 3. drive it through the JS API -->
+<div class="row">
+  <button onclick="v.toggle()">play / pause</button>
+  <button onclick="v.seek(0)">rewind</button>
+  <button onclick="v.setFocalLength(24)">24 mm</button>
+  <button onclick="v.setFocalLength(85)">85 mm</button>
+  <button onclick="v.setWireframe('overlay')">wireframe</button>
+  <button onclick="v.resetView()">reset view</button>
+  <button onclick="shot()">download PNG</button>
+  <span id="status"></span>
+</div>
+
+<script type="module">
+  const v = document.getElementById('v');
+  window.v = v;
+  v.addEventListener('av-ready', (e) => console.log('ready', e.detail));
+  v.addEventListener('av-frame', (e) => {
+    document.getElementById('status').textContent =
+      `frame ${e.detail.frame + 1}/${e.detail.frameCount} — ${e.detail.time.toFixed(2)}s`;
+  });
+  window.shot = async () => {
+    const blob = await v.screenshot({ scale: 2 });
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = 'frame.png';
+    a.click();
+  };
+</script>
+</body>
+</html>

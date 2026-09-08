@@ -1,0 +1,59 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>alembic-viewer — iframe embed</title>
+<style>
+  body { margin: 0; background: #0f0f12; font: 14px system-ui; color: #ddd; padding: 16px; }
+  iframe { border: 0; width: 100%; height: 70vh; border-radius: 12px; background: #16161A; }
+  .row { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 12px; align-items: center; }
+  button { padding: 6px 12px; border-radius: 8px; border: 1px solid #333; background: #1c1c22; color: #ddd; cursor: pointer; }
+</style>
+</head>
+<body>
+
+<!-- host page that cannot load the module itself → uses the iframe wrapper -->
+<iframe id="f"
+  src="../embed.html?src=../models/Untitled/manifest.json&accent=%235B9CFF&controls=full&autoplay=1"
+  allowfullscreen></iframe>
+
+<div class="row">
+  <button onclick="cmd('toggle')">play / pause</button>
+  <button onclick="cmd('seek', 0)">rewind</button>
+  <button onclick="cmd('setFocalLength', 24)">24 mm</button>
+  <button onclick="cmd('setFocalLength', 85)">85 mm</button>
+  <button onclick="cmd('setWireframe', 'overlay')">wireframe</button>
+  <button onclick="shot()">screenshot → new tab</button>
+  <span id="status"></span>
+</div>
+
+<script>
+  const f = document.getElementById('f');
+  let seq = 0;
+  const pending = new Map();
+
+  function cmd(name, ...args) {
+    const id = ++seq;
+    return new Promise((resolve) => {
+      pending.set(id, resolve);
+      f.contentWindow.postMessage({ source: 'alembic-viewer', type: 'command', id, name, args }, '*');
+    });
+  }
+
+  async function shot() {
+    const res = await cmd('screenshot', { scale: 2 });
+    window.open(res.dataUrl);
+  }
+
+  addEventListener('message', (e) => {
+    const d = e.data;
+    if (!d || d.source !== 'alembic-viewer') return;
+    if (d.type === 'response' && pending.has(d.id)) { pending.get(d.id)(d); pending.delete(d.id); }
+    if (d.type === 'event' && d.name === 'frame') {
+      document.getElementById('status').textContent =
+        `frame ${d.detail.frame + 1}/${d.detail.frameCount}`;
+    }
+  });
+</script>
+</body>
+</html>
