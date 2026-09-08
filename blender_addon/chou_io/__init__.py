@@ -16,7 +16,7 @@ Then: File > Export > La Chouette Bundle (.chou)
 bl_info = {
     "name": "La Chouette Bundle (.chou)",
     "author": "LACHOUETTE",
-    "version": (0, 1, 0),
+    "version": (0, 1, 2),
     "blender": (4, 0, 0),
     "location": "File > Import/Export",
     "description": "Import/Export .chou — Alembic geometry cache + materials bundle",
