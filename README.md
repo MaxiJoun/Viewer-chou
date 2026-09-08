@@ -1,6 +1,6 @@
 # WEB_ALEMBIC
 
-Lecteur web pour **animations Alembic (`.abc`)** — orbite caméra, **focale réelle
+Lecteur web pour **animations Alembic et chou** — orbite caméra, **focale réelle
 (mm)**, wireframe, timeline. Autonome, embarquable (clone Kitsu, board PureRef…).
 
 - **Intégration / API / format de données → [`INTEGRATION.md`](INTEGRATION.md)**
