@@ -31,11 +31,15 @@ import json
 import math
 import array
 import argparse
+import mathutils
 
 _ADDON = os.path.join(os.path.dirname(os.path.abspath(__file__)),
                       "..", "blender_addon", "chou_io")
 if _ADDON not in sys.path:
     sys.path.insert(0, _ADDON)
+
+# Blender is Z-up, three.js is Y-up. Rotate -90° about X: (x, y, z) -> (x, z, -y)
+ZUP_TO_YUP = mathutils.Matrix.Rotation(-math.pi / 2.0, 4, "X")
 
 
 def parse_args():
@@ -185,7 +189,7 @@ def main():
         for o in meshes:
             ev = o.evaluated_get(deps)
             me = ev.to_mesh()
-            me.transform(o.matrix_world)
+            me.transform(ZUP_TO_YUP @ o.matrix_world)   # world space, Y-up
             me.calc_loop_triangles()
             try:
                 vnorm = me.vertex_normals

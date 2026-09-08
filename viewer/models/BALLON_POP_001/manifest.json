@@ -1,6 +1,6 @@
 {
   "name": "BALLON_POP_001",
-  "source": "tmp4lbedv9p.chou",
+  "source": "tmps8nxvs5b.chou",
   "fps": 24.0,
   "frameStart": 1,
   "frameEnd": 35,
@@ -19,7 +19,11 @@
       1.703678846359253
     ]
   },
-  "layout": "pos:f32*3N | nrm:f32*3N | idx:u32*3T  (little-endian, world space)",
+  "binLayout": "corners_pos_nrm_uv",
+  "layout": "un-indexed: pos:f32*3N | nrm:f32*3N | uv:f32*2N  (N = 3*triangleCount, little-endian, world space)",
+  "attributes": {
+    "uv": true
+  },
   "materials": [
     {
       "name": "Material",
@@ -29,21 +33,12 @@
         0.006670156493782997,
         1.0
       ]
-    },
-    {
-      "name": "Material.001",
-      "baseColor": [
-        0.800000011920929,
-        0.800000011920929,
-        0.800000011920929,
-        1.0
-      ]
     }
   ],
   "frames": [
     {
       "file": "frames/frame_0000.bin",
-      "vertexCount": 530,
+      "vertexCount": 3096,
       "triangleCount": 1032,
       "groups": [
         [
@@ -55,7 +50,7 @@
     },
     {
       "file": "frames/frame_0001.bin",
-      "vertexCount": 530,
+      "vertexCount": 3096,
       "triangleCount": 1032,
       "groups": [
         [
@@ -67,7 +62,7 @@
     },
     {
       "file": "frames/frame_0002.bin",
-      "vertexCount": 530,
+      "vertexCount": 3096,
       "triangleCount": 1032,
       "groups": [
         [
@@ -79,7 +74,7 @@
     },
     {
       "file": "frames/frame_0003.bin",
-      "vertexCount": 530,
+      "vertexCount": 3096,
       "triangleCount": 1032,
       "groups": [
         [
@@ -91,7 +86,7 @@
     },
     {
       "file": "frames/frame_0004.bin",
-      "vertexCount": 530,
+      "vertexCount": 3096,
       "triangleCount": 1032,
       "groups": [
         [
@@ -103,7 +98,7 @@
     },
     {
       "file": "frames/frame_0005.bin",
-      "vertexCount": 530,
+      "vertexCount": 3096,
       "triangleCount": 1032,
       "groups": [
         [
@@ -115,7 +110,7 @@
     },
     {
       "file": "frames/frame_0006.bin",
-      "vertexCount": 530,
+      "vertexCount": 3096,
       "triangleCount": 1032,
       "groups": [
         [
@@ -127,7 +122,7 @@
     },
     {
       "file": "frames/frame_0007.bin",
-      "vertexCount": 530,
+      "vertexCount": 3096,
       "triangleCount": 1032,
       "groups": [
         [
@@ -139,7 +134,7 @@
     },
     {
       "file": "frames/frame_0008.bin",
-      "vertexCount": 530,
+      "vertexCount": 3096,
       "triangleCount": 1032,
       "groups": [
         [
@@ -151,7 +146,7 @@
     },
     {
       "file": "frames/frame_0009.bin",
-      "vertexCount": 530,
+      "vertexCount": 3096,
       "triangleCount": 1032,
       "groups": [
         [
@@ -163,7 +158,7 @@
     },
     {
       "file": "frames/frame_0010.bin",
-      "vertexCount": 530,
+      "vertexCount": 3096,
       "triangleCount": 1032,
       "groups": [
         [
@@ -175,7 +170,7 @@
     },
     {
       "file": "frames/frame_0011.bin",
-      "vertexCount": 530,
+      "vertexCount": 3096,
       "triangleCount": 1032,
       "groups": [
         [
@@ -187,7 +182,7 @@
     },
     {
       "file": "frames/frame_0012.bin",
-      "vertexCount": 530,
+      "vertexCount": 3096,
       "triangleCount": 1032,
       "groups": [
         [
@@ -199,7 +194,7 @@
     },
     {
       "file": "frames/frame_0013.bin",
-      "vertexCount": 530,
+      "vertexCount": 3096,
       "triangleCount": 1032,
       "groups": [
         [
@@ -211,7 +206,7 @@
     },
     {
       "file": "frames/frame_0014.bin",
-      "vertexCount": 530,
+      "vertexCount": 3096,
       "triangleCount": 1032,
       "groups": [
         [
@@ -223,7 +218,7 @@
     },
     {
       "file": "frames/frame_0015.bin",
-      "vertexCount": 530,
+      "vertexCount": 3096,
       "triangleCount": 1032,
       "groups": [
         [
@@ -235,7 +230,7 @@
     },
     {
       "file": "frames/frame_0016.bin",
-      "vertexCount": 530,
+      "vertexCount": 3096,
       "triangleCount": 1032,
       "groups": [
         [
@@ -247,7 +242,7 @@
     },
     {
       "file": "frames/frame_0017.bin",
-      "vertexCount": 530,
+      "vertexCount": 3096,
       "triangleCount": 1032,
       "groups": [
         [
@@ -259,7 +254,7 @@
     },
     {
       "file": "frames/frame_0018.bin",
-      "vertexCount": 530,
+      "vertexCount": 3096,
       "triangleCount": 1032,
       "groups": [
         [
@@ -271,7 +266,7 @@
     },
     {
       "file": "frames/frame_0019.bin",
-      "vertexCount": 530,
+      "vertexCount": 3096,
       "triangleCount": 1032,
       "groups": [
         [
@@ -283,7 +278,7 @@
     },
     {
       "file": "frames/frame_0020.bin",
-      "vertexCount": 530,
+      "vertexCount": 3096,
       "triangleCount": 1032,
       "groups": [
         [
@@ -295,7 +290,7 @@
     },
     {
       "file": "frames/frame_0021.bin",
-      "vertexCount": 530,
+      "vertexCount": 3096,
       "triangleCount": 1032,
       "groups": [
         [
@@ -307,7 +302,7 @@
     },
     {
       "file": "frames/frame_0022.bin",
-      "vertexCount": 530,
+      "vertexCount": 3096,
       "triangleCount": 1032,
       "groups": [
         [
@@ -319,7 +314,7 @@
     },
     {
       "file": "frames/frame_0023.bin",
-      "vertexCount": 530,
+      "vertexCount": 3096,
       "triangleCount": 1032,
       "groups": [
         [
@@ -331,7 +326,7 @@
     },
     {
       "file": "frames/frame_0024.bin",
-      "vertexCount": 530,
+      "vertexCount": 3096,
       "triangleCount": 1032,
       "groups": [
         [
@@ -343,7 +338,7 @@
     },
     {
       "file": "frames/frame_0025.bin",
-      "vertexCount": 530,
+      "vertexCount": 3096,
       "triangleCount": 1032,
       "groups": [
         [
@@ -355,7 +350,7 @@
     },
     {
       "file": "frames/frame_0026.bin",
-      "vertexCount": 530,
+      "vertexCount": 3096,
       "triangleCount": 1032,
       "groups": [
         [
@@ -367,7 +362,7 @@
     },
     {
       "file": "frames/frame_0027.bin",
-      "vertexCount": 530,
+      "vertexCount": 3096,
       "triangleCount": 1032,
       "groups": [
         [
@@ -379,7 +374,7 @@
     },
     {
       "file": "frames/frame_0028.bin",
-      "vertexCount": 530,
+      "vertexCount": 3096,
       "triangleCount": 1032,
       "groups": [
         [
@@ -391,7 +386,7 @@
     },
     {
       "file": "frames/frame_0029.bin",
-      "vertexCount": 530,
+      "vertexCount": 3096,
       "triangleCount": 1032,
       "groups": [
         [
@@ -403,7 +398,7 @@
     },
     {
       "file": "frames/frame_0030.bin",
-      "vertexCount": 530,
+      "vertexCount": 3096,
       "triangleCount": 1032,
       "groups": [
         [
@@ -415,7 +410,7 @@
     },
     {
       "file": "frames/frame_0031.bin",
-      "vertexCount": 530,
+      "vertexCount": 3096,
       "triangleCount": 1032,
       "groups": [
         [
@@ -427,7 +422,7 @@
     },
     {
       "file": "frames/frame_0032.bin",
-      "vertexCount": 530,
+      "vertexCount": 3096,
       "triangleCount": 1032,
       "groups": [
         [
@@ -439,7 +434,7 @@
     },
     {
       "file": "frames/frame_0033.bin",
-      "vertexCount": 530,
+      "vertexCount": 3096,
       "triangleCount": 1032,
       "groups": [
         [
@@ -451,7 +446,7 @@
     },
     {
       "file": "frames/frame_0034.bin",
-      "vertexCount": 530,
+      "vertexCount": 3096,
       "triangleCount": 1032,
       "groups": [
         [

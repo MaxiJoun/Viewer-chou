@@ -32,6 +32,10 @@ import struct
 import argparse
 import math
 import array
+import mathutils
+
+# Blender Z-up -> three.js Y-up : rotate -90° about X  (x, y, z) -> (x, z, -y)
+ZUP_TO_YUP = mathutils.Matrix.Rotation(-math.pi / 2.0, 4, "X")
 
 
 def parse_args():
@@ -101,7 +105,7 @@ def main():
         for o in meshes:
             ev = o.evaluated_get(deps)
             me = ev.to_mesh()
-            me.transform(o.matrix_world)
+            me.transform(ZUP_TO_YUP @ o.matrix_world)   # world space, Y-up
             me.calc_loop_triangles()
 
             try:
